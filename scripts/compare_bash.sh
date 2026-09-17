@@ -37,10 +37,12 @@ echo "--- 2. Running bamdip (-n $N) ---"
 bin/bamdip -n "$N" "$INPUT" "$WORKDIR/bamdip.bam"
 
 echo "--- 3. Running reference Bash pipeline ---"
+set +o pipefail
 (
   samtools view -H "$INPUT"
-  samtools view "$INPUT" | head -n "$N"
+  samtools view "$INPUT" 2>/dev/null | head -n "$N"
 ) | samtools view -b -o "$WORKDIR/bash.bam"
+set -o pipefail
 
 echo "--- 4. Validating with samtools quickcheck ---"
 samtools quickcheck -v "$WORKDIR/bamdip.bam"
