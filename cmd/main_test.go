@@ -12,26 +12,33 @@ func TestValidateArgsSamplingModeMutualExclusion(t *testing.T) {
 			name: "ratio only",
 			args: &CLIArgs{
 				Ratio:      0.1,
-				InputMode:  "single",
 				SortOrder:  "none",
 				InputFiles: []string{"in.bam", "out.bam"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "count only",
+			name: "count only (default first N)",
 			args: &CLIArgs{
-				AbsoluteCount: 100,
-				InputMode:     "single",
-				SortOrder:     "none",
-				InputFiles:    []string{"in.bam", "out.bam"},
+				Count:      100,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "count with random flag",
+			args: &CLIArgs{
+				Count:      100,
+				Random:     true,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing ratio and count",
 			args: &CLIArgs{
-				InputMode:  "single",
 				SortOrder:  "none",
 				InputFiles: []string{"in.bam", "out.bam"},
 			},
@@ -40,11 +47,37 @@ func TestValidateArgsSamplingModeMutualExclusion(t *testing.T) {
 		{
 			name: "ratio and count both set",
 			args: &CLIArgs{
-				Ratio:         0.1,
-				AbsoluteCount: 100,
-				InputMode:     "single",
-				SortOrder:     "none",
-				InputFiles:    []string{"in.bam", "out.bam"},
+				Ratio:      0.1,
+				Count:      100,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative count",
+			args: &CLIArgs{
+				Count:      -5,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "ratio out of bounds (> 1)",
+			args: &CLIArgs{
+				Ratio:      1.5,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "ratio out of bounds (< 0)",
+			args: &CLIArgs{
+				Ratio:      -0.1,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
 			},
 			wantErr: true,
 		},
@@ -68,36 +101,25 @@ func TestValidatePositionalArgs(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "single mode needs two args",
+			name: "needs two args, given one",
 			args: &CLIArgs{
-				InputMode:  "single",
 				InputFiles: []string{"in.bam"},
 			},
 			wantErr: true,
 		},
 		{
-			name: "single mode ok",
+			name: "needs two args, given two",
 			args: &CLIArgs{
-				InputMode:  "single",
 				InputFiles: []string{"in.bam", "out.bam"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "dual mode needs three args",
+			name: "needs two args, given three",
 			args: &CLIArgs{
-				InputMode:  "dual",
-				InputFiles: []string{"r1.bam", "r2.bam"},
+				InputFiles: []string{"in.bam", "out.bam", "extra.bam"},
 			},
 			wantErr: true,
-		},
-		{
-			name: "dual mode ok",
-			args: &CLIArgs{
-				InputMode:  "dual",
-				InputFiles: []string{"r1.bam", "r2.bam", "prefix"},
-			},
-			wantErr: false,
 		},
 	}
 
@@ -122,8 +144,17 @@ func TestValidateArgsIndexRequiresCoordSort(t *testing.T) {
 			name: "index without coord sort errors",
 			args: &CLIArgs{
 				Ratio:       0.1,
-				InputMode:   "single",
 				SortOrder:   "none",
+				CreateIndex: true,
+				InputFiles:  []string{"in.bam", "out.bam"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "index with name sort errors",
+			args: &CLIArgs{
+				Ratio:       0.1,
+				SortOrder:   "name",
 				CreateIndex: true,
 				InputFiles:  []string{"in.bam", "out.bam"},
 			},
@@ -133,7 +164,6 @@ func TestValidateArgsIndexRequiresCoordSort(t *testing.T) {
 			name: "index with coord sort passes",
 			args: &CLIArgs{
 				Ratio:       0.1,
-				InputMode:   "single",
 				SortOrder:   "coord",
 				CreateIndex: true,
 				InputFiles:  []string{"in.bam", "out.bam"},

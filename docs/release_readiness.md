@@ -1,37 +1,29 @@
-# bamsampler 发布准备与剩余清单
+# bamdip 发布准备与验证清单
 
-## 当前状态（已完成）
+## 项目变更说明
 
-- `-index` 与 `-sort` 约束已收紧：非 `-sort coord` 时直接报错退出。
-- `cmd` 层参数校验测试已补齐（互斥参数、位置参数、索引参数组合）。
-- 最小 CI 已接入：`go test -count=1 ./...`、`go vet ./...`、`go build -o bamsampler ./cmd`。
-- 文档已同步 `-count` 语义为 pair 数，`-index` 依赖 `-sort coord`。
+本项目已由原 `bamsampler`（强制双端 pair 配对）重构并更名为 **`bamdip`**：
+- 底层驱动升级为 `github.com/otterlab-bio/bamdriver v1.0.0`。
+- 采样原子单位更新为单条 BAM alignment record，天然支持 RNA-seq 等场景中一条 QNAME 对应 3~4 条比对记录的情况。
+- 模式规范：
+  - `-n / -count N`：默认截取流式前 N 条记录。
+  - `-random`：配合 `-n / -count` 开启单遍蓄水池随机下采样（支持 `-seed`）。
+  - `-ratio R`：按比例采样（两遍流式蓄水池采样，支持 `-seed`）。
+  - `-sort coord|name` 与 `-index`：支持按坐标/名称排序并在坐标排序时生成 BAI。
 
-## 剩余发布清单（待完成）
+## 验证覆盖矩阵
 
-### 1) 真实 BAM 端到端回归（最高优先级）
-
-- 使用真实 mapping BAM 完成 2-3 组回归，至少覆盖以下场景：
-- 单 BAM 输入（含常规 paired 数据）。
-- 双 BAM 输入（R1/R2 分离）。
-- 异常数据（orphan、secondary/supplementary、多重比对）。
-- 每组固化对照结果：`TotalPairedInput`、`TotalPairedOutput`、`TotalOutputRecords`、`OrphanReads`、`MultimapDropped`、`SecondaryDropped`。
-
-验收标准：
-
-- 同一输入 + 同一 seed 结果稳定一致。
-- 配对完整性满足预期（输出无断裂 pair）。
-- 统计值与预期基线一致或在可解释范围内。
-
-### 2) 发布元数据与说明
-
-- 生成版本号（tag）与 changelog。
-- 增加“可信度说明”，明确：
-- 已验证范围（当前测试和真实回归覆盖面）。
-- 未覆盖范围（明确边界与风险）。
-- 输出统计口径说明（`count` 为 pair 数）。
-
-验收标准：
-
-- 发布包可追溯到唯一版本与提交。
-- 用户能从文档快速判断工具适用边界与结果可信度。
+1. **单元与集成测试**：
+   - 默认 First-N 采样。
+   - RNA-seq 多重比对记录（3~4 条同 QNAME）完整保留。
+   - 边界情况：请求数超过总数、N=0、空 BAM。
+   - Random-N 随机种子可复现性验证。
+   - Ratio 采样比例精确性与种子可复现性。
+   - 坐标排序与名称排序校验、`-index` 必须配合 `-sort coord` 规则。
+   - 真实 `bamdriver` 数据集 (`testdata/Test_hg19_NRAS.bam`) 端到端验证。
+2. **Bash 对照与 Samtools 检查**：
+   - `scripts/compare_bash.sh` 对比 `(samtools view -H ; samtools view | head -n N) | samtools view -b`。
+   - 保证 record stream 逐行逐字段 100% 一致。
+   - 产物通过 `samtools quickcheck -v` 检查。
+3. **CI 自动化**：
+   - GitHub Actions `ci.yml` 覆盖 Go 1.24、vet、单元测试、Bash 参考对照测试、多场景 samtools quickcheck 与 idxstats 校验。

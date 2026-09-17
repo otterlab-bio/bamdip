@@ -3,24 +3,79 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  build-and-check:
+  build-and-test:
+    name: Build, Test & Samtools Equivalence
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
+          cache: true
 
-      - name: Run tests
-        run: go test -count=1 ./...
+      - name: Install bioinformatics tools (samtools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y samtools
+          samtools --version | head -n 2
 
-      - name: Run vet
+      - name: Run Go tests
+        run: go test -v -count=1 ./...
+
+      - name: Run Go vet
         run: go vet ./...
 
-      - name: Build binary
-        run: go build -o bamsampler ./cmd
+      - name: Build bamdip binary
+        run: |
+          mkdir -p bin
+          go build -o bin/bamdip ./cmd
+
+      - name: Build bamdriver roundtrip oracle
+        run: go build -o bin/bamroundtrip github.com/otterlab-bio/bamdriver/cmd/bamroundtrip
+
+      - name: Compare first-N sampling with Bash reference (hg19)
+        run: bash scripts/compare_bash.sh testdata/Test_hg19_NRAS.bam 100
+
+      - name: Compare first-N sampling with Bash reference (mm10)
+        run: bash scripts/compare_bash.sh testdata/Test_mm10_NRAS.bam 50
+
+      - name: Validate all sampling modes with samtools
+        run: |
+          set -euo pipefail
+          mkdir -p ci-out
+
+          # 1. Random N sampling
+          bin/bamdip -n 200 -random -seed 42 testdata/Test_hg19_NRAS.bam ci-out/random_200.bam
+          samtools quickcheck -v ci-out/random_200.bam
+          count_rand=$(samtools view -c ci-out/random_200.bam)
+          [ "$count_rand" -eq 200 ]
+          echo "✓ Random N sampling passed samtools quickcheck ($count_rand records)"
+
+          # 2. Ratio mode sampling
+          bin/bamdip -ratio 0.1 -seed 42 testdata/Test_hg19_NRAS.bam ci-out/ratio_0.1.bam
+          samtools quickcheck -v ci-out/ratio_0.1.bam
+          count_ratio=$(samtools view -c ci-out/ratio_0.1.bam)
+          [ "$count_ratio" -eq 128 ]
+          echo "✓ Ratio sampling passed samtools quickcheck ($count_ratio records)"
+
+          # 3. Coordinate sorting and BAI index generation
+          bin/bamdip -n 300 -sort coord -index testdata/Test_hg19_NRAS.bam ci-out/coord_indexed.bam
+          samtools quickcheck -v ci-out/coord_indexed.bam
+          test -f ci-out/coord_indexed.bam.bai
+          samtools idxstats ci-out/coord_indexed.bam > ci-out/coord_indexed.idxstats.tsv
+          echo "✓ Coordinate-sorted indexed BAM passed samtools idxstats"
+
+          # 4. Name sorting
+          bin/bamdip -n 150 -sort name testdata/Test_hg19_NRAS.bam ci-out/name_sorted.bam
+          samtools quickcheck -v ci-out/name_sorted.bam
+          count_name=$(samtools view -c ci-out/name_sorted.bam)
+          [ "$count_name" -eq 150 ]
+          echo "✓ Name-sorted BAM passed samtools quickcheck ($count_name records)"
+
+          echo "=== All CI validations completed successfully! ==="

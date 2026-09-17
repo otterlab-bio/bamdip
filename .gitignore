@@ -1,4 +1,5 @@
 # Binaries
+/bamdip
 /bamsampler
 /*.exe
 /*.dll
@@ -29,6 +30,8 @@
 *.fq
 *.fastq.gz
 *.fq.gz
+!testdata/*.bam
+!testdata/*.bai
 
 # Editors / OS
 .DS_Store
