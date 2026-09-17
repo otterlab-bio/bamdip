@@ -42,3 +42,4 @@
 /tmp/
 *.tmp
 *.swp
+ci-artifacts/

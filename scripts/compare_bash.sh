@@ -7,6 +7,7 @@ set -euo pipefail
 
 INPUT="${1:-testdata/Test_hg19_NRAS.bam}"
 N="${2:-100}"
+REPORT_JSON="${3:-}"
 WORKDIR="$(mktemp -d -t bamdip_test_XXXXXX)"
 
 cleanup() {
@@ -79,5 +80,24 @@ if [ ! -f "$WORKDIR/bamdip_coord.bam.bai" ]; then
   exit 1
 fi
 echo "✓ Coordinate sorted output and BAI index verified with samtools"
+
+if [ -n "$REPORT_JSON" ]; then
+  mkdir -p "$(dirname "$REPORT_JSON")"
+  python3 -c "
+import json
+report = {
+    'input_bam': '$INPUT',
+    'n_requested': $N,
+    'bamdip_count': $COUNT_BAMDIP,
+    'bash_count': $COUNT_BASH,
+    'records_equal': True,
+    'quickcheck_passed': True,
+    'index_created': True
+}
+with open('$REPORT_JSON', 'w') as f:
+    json.dump(report, f, indent=2)
+"
+  echo "✓ Wrote bash comparison evidence report to $REPORT_JSON"
+fi
 
 echo "=== All checks passed successfully! ==="

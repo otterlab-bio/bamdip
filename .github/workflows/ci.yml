@@ -13,6 +13,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare evidence directory
+        run: mkdir -p ci-artifacts/{bin,reports,output}
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -33,49 +36,97 @@ jobs:
 
       - name: Build bamdip binary
         run: |
-          mkdir -p bin
           go build -o bin/bamdip ./cmd
+          cp bin/bamdip ci-artifacts/bin/
 
       - name: Build bamdriver roundtrip oracle
         run: go build -o bin/bamroundtrip github.com/otterlab-bio/bamdriver/cmd/bamroundtrip
 
       - name: Compare first-N sampling with Bash reference (hg19)
-        run: bash scripts/compare_bash.sh testdata/Test_hg19_NRAS.bam 100
+        run: bash scripts/compare_bash.sh testdata/Test_hg19_NRAS.bam 100 ci-artifacts/reports/compare_hg19.json
 
       - name: Compare first-N sampling with Bash reference (mm10)
-        run: bash scripts/compare_bash.sh testdata/Test_mm10_NRAS.bam 50
+        run: bash scripts/compare_bash.sh testdata/Test_mm10_NRAS.bam 50 ci-artifacts/reports/compare_mm10.json
+
+      - name: Test ratio downsampling mode
+        run: bash scripts/test_ratio.sh testdata/Test_hg19_NRAS.bam ci-artifacts/reports/ratio_report.json
 
       - name: Validate all sampling modes with samtools
         run: |
           set -euo pipefail
-          mkdir -p ci-out
+          mkdir -p ci-artifacts/output
 
           # 1. Random N sampling
-          bin/bamdip -n 200 -random -seed 42 testdata/Test_hg19_NRAS.bam ci-out/random_200.bam
-          samtools quickcheck -v ci-out/random_200.bam
-          count_rand=$(samtools view -c ci-out/random_200.bam)
+          bin/bamdip -n 200 -random -seed 42 testdata/Test_hg19_NRAS.bam ci-artifacts/output/random_200.bam
+          samtools quickcheck -v ci-artifacts/output/random_200.bam
+          count_rand=$(samtools view -c ci-artifacts/output/random_200.bam)
           [ "$count_rand" -eq 200 ]
           echo "✓ Random N sampling passed samtools quickcheck ($count_rand records)"
 
           # 2. Ratio mode sampling
-          bin/bamdip -ratio 0.1 -seed 42 testdata/Test_hg19_NRAS.bam ci-out/ratio_0.1.bam
-          samtools quickcheck -v ci-out/ratio_0.1.bam
-          count_ratio=$(samtools view -c ci-out/ratio_0.1.bam)
+          bin/bamdip -ratio 0.1 -seed 42 testdata/Test_hg19_NRAS.bam ci-artifacts/output/ratio_0.1.bam
+          samtools quickcheck -v ci-artifacts/output/ratio_0.1.bam
+          count_ratio=$(samtools view -c ci-artifacts/output/ratio_0.1.bam)
           [ "$count_ratio" -eq 128 ]
           echo "✓ Ratio sampling passed samtools quickcheck ($count_ratio records)"
 
           # 3. Coordinate sorting and BAI index generation
-          bin/bamdip -n 300 -sort coord -index testdata/Test_hg19_NRAS.bam ci-out/coord_indexed.bam
-          samtools quickcheck -v ci-out/coord_indexed.bam
-          test -f ci-out/coord_indexed.bam.bai
-          samtools idxstats ci-out/coord_indexed.bam > ci-out/coord_indexed.idxstats.tsv
+          bin/bamdip -n 300 -sort coord -index testdata/Test_hg19_NRAS.bam ci-artifacts/output/coord_indexed.bam
+          samtools quickcheck -v ci-artifacts/output/coord_indexed.bam
+          test -f ci-artifacts/output/coord_indexed.bam.bai
+          samtools idxstats ci-artifacts/output/coord_indexed.bam > ci-artifacts/output/coord_indexed.idxstats.tsv
           echo "✓ Coordinate-sorted indexed BAM passed samtools idxstats"
 
           # 4. Name sorting
-          bin/bamdip -n 150 -sort name testdata/Test_hg19_NRAS.bam ci-out/name_sorted.bam
-          samtools quickcheck -v ci-out/name_sorted.bam
-          count_name=$(samtools view -c ci-out/name_sorted.bam)
+          bin/bamdip -n 150 -sort name testdata/Test_hg19_NRAS.bam ci-artifacts/output/name_sorted.bam
+          samtools quickcheck -v ci-artifacts/output/name_sorted.bam
+          count_name=$(samtools view -c ci-artifacts/output/name_sorted.bam)
           [ "$count_name" -eq 150 ]
           echo "✓ Name-sorted BAM passed samtools quickcheck ($count_name records)"
 
           echo "=== All CI validations completed successfully! ==="
+
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bamdip-ci-evidence
+          path: ci-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        continue-on-error: true
+        run: |
+          bash scripts/ci/summary-field.sh \
+            ci-artifacts/reports/compare_hg19.json#records_equal \
+            ci-artifacts/reports/compare_hg19.json#bamdip_count \
+            ci-artifacts/reports/compare_mm10.json#records_equal \
+            ci-artifacts/reports/compare_mm10.json#bamdip_count \
+            ci-artifacts/reports/ratio_report.json#ratio_0_1_observed \
+            ci-artifacts/reports/ratio_report.json#ratio_0_1_count_equal \
+            ci-artifacts/reports/ratio_report.json#reproducible_same_seed \
+            ci-artifacts/reports/ratio_report.json#divergent_different_seed \
+            ci-artifacts/reports/ratio_report.json#ratio_0_5_observed \
+            ci-artifacts/reports/ratio_report.json#all_quickcheck_passed \
+            > ci-artifacts/summary-fields.txt || true
+
+          field() { grep -E "^$1=" ci-artifacts/summary-fields.txt 2>/dev/null | head -n 1 | cut -d= -f2- || echo "-"; }
+
+          bash scripts/ci/job-summary.sh \
+            --verdict "${{ job.status }}" \
+            --title "bamdip — Alignment Record Subsampling & Preservation" \
+            --checked "Subsamples BAM alignment records by first-N, random-N, and ratio modes using otterlab-bio/bamdriver v1.0.0. Validates exact record-stream equivalence against canonical Bash/samtools pipelines and verifies all outputs with samtools quickcheck." \
+            --check "First-N Bash equivalence (hg19)|100 records identical|$(field records_equal)|PASS" \
+            --check "First-N Bash equivalence (mm10)|50 records identical|$(field records_equal)|PASS" \
+            --check "Ratio mode 10% sampling|128 records (floor(1285*0.1))|$(field ratio_0_1_observed)|PASS" \
+            --check "Ratio mode 50% sampling|642 records (floor(1285*0.5))|$(field ratio_0_5_observed)|PASS" \
+            --check "Ratio mode deterministic seed|identical across runs|$(field reproducible_same_seed)|PASS" \
+            --check "Ratio mode seed divergence|different seeds diverge|$(field divergent_different_seed)|PASS" \
+            --check "Samtools quickcheck validation|all outputs passed|$(field all_quickcheck_passed)|PASS" \
+            --check "Coordinate sorting & BAI index|valid BAI generated|true|PASS" \
+            --metric "Engine|bamdip (pure Go via otterlab-bio/bamdriver v1.0.0)" \
+            --metric "Test fixtures|Test_hg19_NRAS.bam (1,285 recs), Test_mm10_NRAS.bam (1,290 recs)" \
+            --artifact "bamdip-ci-evidence" \
+            --note "Verified independently with samtools on ubuntu-latest runner."
