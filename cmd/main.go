@@ -54,9 +54,9 @@ func parseArgs() *CLIArgs {
 	args := &CLIArgs{}
 
 	var countShort, countLong int64
-	flag.Int64Var(&countShort, "n", -1, "Number of alignment records to sample (default: first N; with -random: random N)")
-	flag.Int64Var(&countLong, "count", -1, "Alias for -n")
-	flag.Float64Var(&args.Ratio, "ratio", -1.0, "Sampling ratio (0.0-1.0), e.g., 0.1 for 10%")
+	flag.Int64Var(&countShort, "n", 0, "Number of alignment records to sample (default: first N; with -random: random N)")
+	flag.Int64Var(&countLong, "count", 0, "Alias for -n")
+	flag.Float64Var(&args.Ratio, "ratio", 0, "Sampling ratio (0.0-1.0), e.g., 0.1 for 10%")
 	flag.BoolVar(&args.Random, "random", false, "Perform random downsampling instead of default first-N")
 	flag.Int64Var(&args.Seed, "seed", 0, "Random seed (optional, for reproducible sampling)")
 	flag.StringVar(&args.SortOrder, "sort", "none", "Sort order for output: name, coord, or none (default: none)")
@@ -77,6 +77,19 @@ func parseArgs() *CLIArgs {
 			args.HasRatio = true
 		}
 	})
+
+	if !args.HasCount {
+		if countShort > 0 {
+			args.Count = countShort
+			args.HasCount = true
+		} else if countLong > 0 {
+			args.Count = countLong
+			args.HasCount = true
+		}
+	}
+	if !args.HasRatio && args.Ratio > 0 {
+		args.HasRatio = true
+	}
 
 	args.InputFiles = flag.Args()
 	return args
@@ -133,7 +146,7 @@ func createConfig(args *CLIArgs) *sampler.SamplingConfig {
 		CreateIndex: args.CreateIndex,
 	}
 
-	if args.Ratio != 0 {
+	if args.HasRatio || args.Ratio > 0 {
 		config.Mode = sampler.ModeRatio
 	} else {
 		config.Mode = sampler.ModeCount
