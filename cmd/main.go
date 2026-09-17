@@ -12,7 +12,9 @@ import (
 // CLIArgs 命令行参数结构体
 type CLIArgs struct {
 	Count       int64   // 采样条数 (-n 或 -count)
+	HasCount    bool    // 是否显式指定了 count
 	Ratio       float64 // 采样比例 (-ratio)
+	HasRatio    bool    // 是否显式指定了 ratio
 	Random      bool    // 是否随机采样 (-random)
 	Seed        int64   // 随机种子 (-seed)
 	SortOrder   string  // 排序方式 (-sort)
@@ -52,9 +54,9 @@ func parseArgs() *CLIArgs {
 	args := &CLIArgs{}
 
 	var countShort, countLong int64
-	flag.Int64Var(&countShort, "n", 0, "Number of alignment records to sample (default: first N; with -random: random N)")
-	flag.Int64Var(&countLong, "count", 0, "Alias for -n")
-	flag.Float64Var(&args.Ratio, "ratio", 0, "Sampling ratio (0.0-1.0), e.g., 0.1 for 10%")
+	flag.Int64Var(&countShort, "n", -1, "Number of alignment records to sample (default: first N; with -random: random N)")
+	flag.Int64Var(&countLong, "count", -1, "Alias for -n")
+	flag.Float64Var(&args.Ratio, "ratio", -1.0, "Sampling ratio (0.0-1.0), e.g., 0.1 for 10%")
 	flag.BoolVar(&args.Random, "random", false, "Perform random downsampling instead of default first-N")
 	flag.Int64Var(&args.Seed, "seed", 0, "Random seed (optional, for reproducible sampling)")
 	flag.StringVar(&args.SortOrder, "sort", "none", "Sort order for output: name, coord, or none (default: none)")
@@ -63,19 +65,26 @@ func parseArgs() *CLIArgs {
 	flag.Usage = usage
 	flag.Parse()
 
-	if countShort > 0 {
-		args.Count = countShort
-	} else if countLong > 0 {
-		args.Count = countLong
-	}
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "n":
+			args.HasCount = true
+			args.Count = countShort
+		case "count":
+			args.HasCount = true
+			args.Count = countLong
+		case "ratio":
+			args.HasRatio = true
+		}
+	})
 
 	args.InputFiles = flag.Args()
 	return args
 }
 
 func validateArgs(args *CLIArgs) error {
-	hasCount := args.Count != 0
-	hasRatio := args.Ratio != 0
+	hasCount := args.HasCount || args.Count > 0
+	hasRatio := args.HasRatio || args.Ratio > 0
 
 	if !hasCount && !hasRatio {
 		return fmt.Errorf("either -n/-count or -ratio must be specified")
@@ -89,7 +98,7 @@ func validateArgs(args *CLIArgs) error {
 	}
 
 	if hasCount && args.Count < 0 {
-		return fmt.Errorf("count must be positive")
+		return fmt.Errorf("count must be non-negative")
 	}
 
 	if err := validatePositionalArgs(args); err != nil {

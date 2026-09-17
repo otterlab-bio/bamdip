@@ -37,6 +37,16 @@ func TestValidateArgsSamplingModeMutualExclusion(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "explicit zero count",
+			args: &CLIArgs{
+				HasCount:   true,
+				Count:      0,
+				SortOrder:  "none",
+				InputFiles: []string{"in.bam", "out.bam"},
+			},
+			wantErr: false,
+		},
+		{
 			name: "missing ratio and count",
 			args: &CLIArgs{
 				SortOrder:  "none",
